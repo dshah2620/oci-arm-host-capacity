@@ -51,7 +51,7 @@ jobs:
             --assign-public-ip true \
             --display-name "invoiceprocessor" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            2>&1)
+            2>&1) || true
 
           if echo "$result" | grep -qi "out of capacity\|InternalError"; then
             echo "No capacity yet. Will retry in 10 minutes."
