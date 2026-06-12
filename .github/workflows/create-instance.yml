@@ -40,29 +40,28 @@ jobs:
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
         run: |
           printf '%s' "$OCI_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub
-          echo "=== Values being used ==="
-          echo "AD: $OCI_AVAILABILITY_DOMAIN"
-          echo "Compartment: $OCI_COMPARTMENT_ID"
-          echo "Subnet: $OCI_SUBNET_ID"
-          echo "Image: $OCI_IMAGE_ID"
-          echo "SSH key: $(cat /tmp/ssh_key.pub)"
-          echo "========================="
-          oci compute instance launch \
-            --availability-domain "$OCI_AVAILABILITY_DOMAIN" \
+
+          AD=$(oci iam availability-domain list \
+            --compartment-id "$OCI_COMPARTMENT_ID" \
+            --query 'data[0].name' \
+            --raw-output)
+          echo "Using availability domain: $AD"
+
+          result=$(oci compute instance launch \
+            --availability-domain "$AD" \
             --compartment-id "$OCI_COMPARTMENT_ID" \
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus":4,"memoryInGBs":24}' \
             --source-details "{\"sourceType\":\"image\",\"imageId\":\"$OCI_IMAGE_ID\"}" \
             --subnet-id "$OCI_SUBNET_ID" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            --debug 2>&1 | tail -80 || true
+            2>&1) || true
 
           if echo "$result" | grep -qi "out of capacity\|InternalError"; then
             echo "No capacity yet. Will retry in 10 minutes."
             exit 0
           elif echo "$result" | grep -q '"id"'; then
             echo "SUCCESS! Instance created."
-            echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Instance ID:', d['data']['id'])"
             exit 0
           else
             echo "Result: $result"
