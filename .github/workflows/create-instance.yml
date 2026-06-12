@@ -40,18 +40,22 @@ jobs:
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
         run: |
           printf '%s' "$OCI_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub
-
-          result=$(oci compute instance launch \
+          echo "=== Values being used ==="
+          echo "AD: $OCI_AVAILABILITY_DOMAIN"
+          echo "Compartment: $OCI_COMPARTMENT_ID"
+          echo "Subnet: $OCI_SUBNET_ID"
+          echo "Image: $OCI_IMAGE_ID"
+          echo "SSH key: $(cat /tmp/ssh_key.pub)"
+          echo "========================="
+          oci compute instance launch \
             --availability-domain "$OCI_AVAILABILITY_DOMAIN" \
             --compartment-id "$OCI_COMPARTMENT_ID" \
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus":4,"memoryInGBs":24}' \
-            --source-details "{\"sourceType\":\"image\",\"imageId\":\"$OCI_IMAGE_ID\",\"bootVolumeSizeInGBs\":50}" \
+            --source-details "{\"sourceType\":\"image\",\"imageId\":\"$OCI_IMAGE_ID\"}" \
             --subnet-id "$OCI_SUBNET_ID" \
-            --assign-public-ip true \
-            --display-name "invoiceprocessor" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            2>&1) || true
+            --debug 2>&1 | tail -80 || true
 
           if echo "$result" | grep -qi "out of capacity\|InternalError"; then
             echo "No capacity yet. Will retry in 10 minutes."
