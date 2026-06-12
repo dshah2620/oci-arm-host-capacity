@@ -9,69 +9,58 @@ jobs:
   create-instance:
     runs-on: ubuntu-latest
     steps:
-      - name: Install OCI Python SDK
-        run: pip install oci --quiet
-
-      - name: Try to create ARM instance
+      - name: Setup OCI CLI
         env:
           OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
           OCI_KEY_FINGERPRINT: ${{ secrets.OCI_KEY_FINGERPRINT }}
           OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
           OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
           OCI_REGION: ${{ secrets.OCI_REGION }}
-          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
-          OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
+        run: |
+          pip install oci-cli --quiet
+          mkdir -p ~/.oci
+          printf '%s' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+          cat > ~/.oci/config << OCIEOF
+[DEFAULT]
+user=$OCI_USER_OCID
+fingerprint=$OCI_KEY_FINGERPRINT
+tenancy=$OCI_TENANCY_OCID
+region=$OCI_REGION
+key_file=/home/runner/.oci/key.pem
+OCIEOF
+          chmod 600 ~/.oci/config
+
+      - name: Try to create ARM instance
+        env:
           OCI_AVAILABILITY_DOMAIN: ${{ secrets.OCI_AVAILABILITY_DOMAIN }}
           OCI_COMPARTMENT_ID: ${{ secrets.OCI_COMPARTMENT_ID }}
+          OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
+          OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
         run: |
-          python3 << 'PYEOF'
-          import oci, os, sys
+          printf '%s' "$OCI_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub
 
-          config = {
-              "user": os.environ["OCI_USER_OCID"],
-              "key_content": os.environ["OCI_PRIVATE_KEY"],
-              "fingerprint": os.environ["OCI_KEY_FINGERPRINT"],
-              "tenancy": os.environ["OCI_TENANCY_OCID"],
-              "region": os.environ["OCI_REGION"],
-          }
+          result=$(oci compute instance launch \
+            --availability-domain "$OCI_AVAILABILITY_DOMAIN" \
+            --compartment-id "$OCI_COMPARTMENT_ID" \
+            --shape "VM.Standard.A1.Flex" \
+            --shape-config '{"ocpus":4,"memoryInGBs":24}' \
+            --source-details "{\"sourceType\":\"image\",\"imageId\":\"$OCI_IMAGE_ID\",\"bootVolumeSizeInGBs\":50}" \
+            --subnet-id "$OCI_SUBNET_ID" \
+            --assign-public-ip true \
+            --display-name "invoiceprocessor" \
+            --ssh-authorized-keys-file /tmp/ssh_key.pub \
+            2>&1)
 
-          compute = oci.core.ComputeClient(config)
-
-          instances = compute.list_instances(
-              compartment_id=os.environ["OCI_COMPARTMENT_ID"],
-              display_name="invoiceprocessor"
-          ).data
-
-          running = [i for i in instances if i.lifecycle_state not in ("TERMINATED", "TERMINATING")]
-          if running:
-              print(f"Instance already exists: {running[0].id} ({running[0].lifecycle_state})")
-              sys.exit(0)
-
-          try:
-              r = compute.launch_instance(oci.core.models.LaunchInstanceDetails(
-                  availability_domain=os.environ["OCI_AVAILABILITY_DOMAIN"],
-                  compartment_id=os.environ["OCI_COMPARTMENT_ID"],
-                  shape="VM.Standard.A1.Flex",
-                  shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-                      ocpus=4,
-                      memory_in_gbs=24
-                  ),
-                  source_details=oci.core.models.InstanceSourceViaImageDetails(
-                      image_id=os.environ["OCI_IMAGE_ID"]
-                  ),
-                  create_vnic_details=oci.core.models.CreateVnicDetails(
-                      subnet_id=os.environ["OCI_SUBNET_ID"]
-                  ),
-                  metadata={"ssh_authorized_keys": os.environ["OCI_SSH_PUBLIC_KEY"]}
-              ))
-              print(f"SUCCESS! Instance created: {r.data.id}")
-              sys.exit(0)
-          except oci.exceptions.ServiceError as e:
-              if "Out of capacity" in str(e.message):
-                  print("No capacity yet. Will retry in 10 minutes.")
-                  sys.exit(0)
-              else:
-                  print(f"Error: {e}")
-                  sys.exit(1)
-          PYEOF
+          if echo "$result" | grep -qi "out of capacity\|InternalError"; then
+            echo "No capacity yet. Will retry in 10 minutes."
+            exit 0
+          elif echo "$result" | grep -q '"id"'; then
+            echo "SUCCESS! Instance created."
+            echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Instance ID:', d['data']['id'])"
+            exit 0
+          else
+            echo "Result: $result"
+            exit 1
+          fi
