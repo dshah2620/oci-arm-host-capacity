@@ -21,14 +21,14 @@ jobs:
           mkdir -p ~/.oci
           printf '%s' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
           chmod 600 ~/.oci/key.pem
-          cat > ~/.oci/config << OCIEOF
-[DEFAULT]
-user=$OCI_USER_OCID
-fingerprint=$OCI_KEY_FINGERPRINT
-tenancy=$OCI_TENANCY_OCID
-region=$OCI_REGION
-key_file=/home/runner/.oci/key.pem
-OCIEOF
+          {
+            echo "[DEFAULT]"
+            echo "user=$OCI_USER_OCID"
+            echo "fingerprint=$OCI_KEY_FINGERPRINT"
+            echo "tenancy=$OCI_TENANCY_OCID"
+            echo "region=$OCI_REGION"
+            echo "key_file=/home/runner/.oci/key.pem"
+          } > ~/.oci/config
           chmod 600 ~/.oci/config
 
       - name: Try to create ARM instance
